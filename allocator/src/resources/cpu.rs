@@ -37,17 +37,6 @@ impl Allocation
 	}
 }
 
-/*impl Drop for Allocation
-{
-	fn drop(&mut self)
-	{
-		if let Err(error) = deallocate_cpu_set(&self.cpu_set)
-		{
-			log::error!("Failed to release CPUs: {error}");
-		}
-	}
-}*/
-
 pub fn find_suitable_cpu_sets(cpu_count: usize) -> Result<CpuSets, Error>
 {
 	let cpu_0_numa_node = get_numa_node_for_cpu(0)?;

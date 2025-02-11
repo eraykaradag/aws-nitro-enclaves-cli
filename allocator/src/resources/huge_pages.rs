@@ -39,16 +39,6 @@ impl Allocation
 	}
 }
 
-/*impl Drop for Allocation
-{
-	fn drop(&mut self)
-	{
-		if let Err(error) = release_huge_pages(self.numa_node, &self.allocated_pages)
-		{
-			log::error!("Failed to release huge pages: {error}");
-		}
-	}
-}*/
 
 fn configure_huge_pages(numa_node: usize, memory_mib: usize) -> Result<Pages, Error>
 {
