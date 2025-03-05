@@ -22,16 +22,18 @@ use log::{debug, info};
 use sha2::{Digest, Sha384};
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{PathBuf,Path};
+use url::Url;
+use aws_sdk_s3::Client;
 
-use common::commands_parser::{BuildEnclavesArgs, EmptyArgs, RunEnclavesArgs};
+use common::commands_parser::{BuildEnclavesArgs, EmptyArgs, FetchBlobsArgs, RunEnclavesArgs};
 use common::json_output::{
     EifDescribeInfo, EnclaveBuildInfo, EnclaveTerminateInfo, MetadataDescribeInfo,
 };
-use common::{enclave_proc_command_send_single, get_sockets_dir_path};
+use common::{enclave_proc_command_send_single, get_sockets_dir_path, ExitGracefully};
 use common::{EnclaveProcessCommandType, NitroCliErrorEnum, NitroCliFailure, NitroCliResult};
 use enclave_proc_comm::{
     enclave_proc_command_send_all, enclave_proc_handle_outputs, enclave_process_handle_all_replies,
@@ -47,6 +49,8 @@ pub const CID_TO_CONSOLE_PORT_OFFSET: u32 = 10000;
 
 /// Default blobs path to be used if the corresponding environment variable is not set.
 const DEFAULT_BLOBS_PATH: &str = "/usr/share/nitro_enclaves/blobs/";
+/// Download path to be used to fetch binaries with `fetch-blobs` subcommand.
+const BLOBS_DOWNLOAD_PATH: &str = "/var/lib/nitro-cli/binaries/";
 
 /// Build an enclave image file with the provided arguments.
 pub fn build_enclaves(args: BuildEnclavesArgs) -> NitroCliResult<()> {
@@ -572,6 +576,87 @@ pub fn get_file_pcr(path: String, pcr_type: PcrType) -> NitroCliResult<BTreeMap<
     );
     Ok(result)
 }
+///Binary fetching mechanism for `fetch-blobs` subcommand.
+pub async fn fetch_binaries(arg: FetchBlobsArgs){
+    match arg {
+        FetchBlobsArgs::Uri(uri) => {
+            fetch_from_uri(uri).await.map_err(|e|{
+                new_nitro_cli_failure!(&format!("Could not fetch from uri: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+            }).ok_or_exit_with_errno(None);
+        }
+        FetchBlobsArgs::Version(version) => {
+            fetch_from_uri(format!("s3://nitro-binaries-test/releases/{version}/")).await
+            .map_err(|e|{
+                new_nitro_cli_failure!(&format!("Version mismatch: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+            }).ok_or_exit_with_errno(None);
+        }
+    }
+}
+/// Fetching from specific URI that user provided.
+async fn fetch_from_uri(uri: String) -> NitroCliResult<PathBuf> {
+    let url = Url::parse(&uri).map_err(|e| {
+        new_nitro_cli_failure!(&format!("Could not read the provided URI: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+    }).ok_or_exit_with_errno(None);
+
+    fs::create_dir_all(BLOBS_DOWNLOAD_PATH).map_err(|e| {
+        new_nitro_cli_failure!(&format!("Could not create download directory: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+    }).ok_or_exit_with_errno(None);
+
+    match url.scheme() {
+        "s3" => {
+            let bucket = url.host_str().ok_or("No bucket specified").unwrap();
+            let prefix = url.path().trim_start_matches('/');
+
+            let config = aws_config::from_env().load().await;
+            let client = Client::new(&config);
+
+            let objects = client
+                .list_objects_v2()
+                .bucket(bucket)
+                .prefix(prefix)
+                .send()
+                .await
+                .map_err(|e| {
+                    new_nitro_cli_failure!(&format!("Could not list objects from s3: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+                }).ok_or_exit_with_errno(None);
+
+            for object in objects.contents().unwrap_or_default() {
+                let key = object.key().unwrap();
+                let file_name = Path::new(key)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(key);
+                
+                let resp = client
+                    .get_object()
+                    .bucket(bucket)
+                    .key(key)
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        new_nitro_cli_failure!(&format!("Could not fetch from s3 URI {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+                    }).ok_or_exit_with_errno(None);
+
+                let bytes = resp.body.collect().await
+                    .map_err(|e| {
+                        new_nitro_cli_failure!(&format!("Could not read s3 storage: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+                    }).ok_or_exit_with_errno(None);
+                let data = bytes.into_bytes();
+
+                let output_path = PathBuf::from(BLOBS_DOWNLOAD_PATH);
+                fs::write(&output_path.join(file_name), data)
+                    .map_err(|e| {
+                        new_nitro_cli_failure!(&format!("Could not write content to download directory: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+                    }).ok_or_exit_with_errno(None);
+            }
+
+            Ok(PathBuf::from(BLOBS_DOWNLOAD_PATH))
+        }
+        _ => return Err(new_nitro_cli_failure!("Unsupported URI: ",
+            NitroCliErrorEnum::BlobFetcherError)),
+    }
+}
+
 
 /// Macro defining the arguments configuration for a *Nitro CLI* application.
 #[macro_export]
