@@ -143,7 +143,25 @@ impl BuildEnclavesArgs {
         })
     }
 }
-
+/// The arguments used by the `fetch-blobs` command.
+#[derive(Debug)]
+    pub enum FetchBlobsArgs {
+        /// The URI of users binary storage.
+        Uri(String),
+        /// The version number of requested blobs.
+        Version(String),
+    }
+    impl FetchBlobsArgs {
+        /// Creating and matching arguments for `fetch-blobs` command.
+        pub fn new_with(args: &ArgMatches) -> NitroCliResult<Self> {
+            match (args.get_one::<String>("URI"), args.get_one::<String>("version")) {
+                (Some(uri), None) => Ok(FetchBlobsArgs::Uri(uri.to_string())),
+                (None, Some(version)) => Ok(FetchBlobsArgs::Version(version.to_string())),
+                (Some(_), Some(_)) => Err(new_nitro_cli_failure!("Cannot specify both uri and version",NitroCliErrorEnum::ConflictingArgument)),
+                (None, None) => Err(new_nitro_cli_failure!("Either uri or version must be provided",NitroCliErrorEnum::MissingArgument)),
+            }
+        }
+    }
 /// The arguments used by the `terminate-enclave` command.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminateEnclavesArgs {
