@@ -733,6 +733,20 @@ macro_rules! create_app {
                     ),
             )
             .subcommand(
+                Command::new("fetch-blobs")
+                    .about("Pulls binaries from remote repository to build enclave image.")
+                    .arg(
+                        Arg::new("version")
+                            .long("version")
+                            .help("Version tag of requested binary version.")
+                    )
+                    .arg(
+                        Arg::new("URI")
+                            .long("URI")
+                            .help("URI of your binary storage."),
+                    ),
+            )
+            .subcommand(
                 Command::new("describe-eif")
                     .about("Returns information about the EIF found at a given path.")
                     .arg(
