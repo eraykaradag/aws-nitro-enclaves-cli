@@ -227,6 +227,10 @@ fn main() {
                 })
                 .ok_or_exit_with_errno(None);
         }
+        Some(("fetch-blobs", args)) => {
+            println!("fetched from remote repository! {:?}", args);
+            unimplemented!();
+        }
         Some(("describe-eif", args)) => {
             let eif_path = args
                 .get_one::<String>("eif-path")
