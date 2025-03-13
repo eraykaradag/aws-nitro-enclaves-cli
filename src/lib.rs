@@ -28,7 +28,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{PathBuf,Path};
 use url::Url;
 use aws_sdk_s3::Client;
-
+use std::env::consts::ARCH;
 use common::commands_parser::{BuildEnclavesArgs, EmptyArgs, FetchBlobsArgs, RunEnclavesArgs};
 use common::json_output::{
     EifDescribeInfo, EnclaveBuildInfo, EnclaveTerminateInfo, MetadataDescribeInfo,
@@ -50,7 +50,7 @@ pub const CID_TO_CONSOLE_PORT_OFFSET: u32 = 10000;
 /// Default blobs path to be used if the corresponding environment variable is not set.
 const DEFAULT_BLOBS_PATH: &str = "/usr/share/nitro_enclaves/blobs/";
 /// Download path to be used to fetch binaries with `fetch-blobs` subcommand.
-const BLOBS_DOWNLOAD_PATH: &str = "/var/lib/nitro-cli/binaries/";
+const BLOBS_DOWNLOAD_PATH: &str = "/var/lib/nitro-cli/binaries";
 
 /// Build an enclave image file with the provided arguments.
 pub fn build_enclaves(args: BuildEnclavesArgs) -> NitroCliResult<()> {
@@ -309,7 +309,9 @@ fn blobs_path() -> NitroCliResult<String> {
     // TODO Improve error message with a suggestion to the user
     // consider using the default path used by rpm install
     let blobs_res = std::env::var("NITRO_CLI_BLOBS");
-
+    if Path::new(BLOBS_DOWNLOAD_PATH).exists() {
+        return Ok(blobs_res.unwrap_or_else(|_| BLOBS_DOWNLOAD_PATH.to_string()));
+    }
     Ok(blobs_res.unwrap_or_else(|_| DEFAULT_BLOBS_PATH.to_string()))
 }
 
@@ -605,7 +607,13 @@ async fn fetch_from_uri(uri: String) -> NitroCliResult<PathBuf> {
     match url.scheme() {
         "s3" => {
             let bucket = url.host_str().ok_or("No bucket specified").unwrap();
-            let prefix = url.path().trim_start_matches('/');
+            let base_prefix = url.path().trim_start_matches('/');  // "releases/1.3/"
+
+            let arch_prefix = match ARCH {
+                "x86_64" => format!("{base_prefix}build-X64/x86_64/"),
+                "aarch64" => format!("{base_prefix}build-ARM64/aarch64/"),
+                _ => return Err(new_nitro_cli_failure!("Unsupported architecture", NitroCliErrorEnum::BlobFetcherError))
+            };
 
             let config = aws_config::from_env().load().await;
             let client = Client::new(&config);
@@ -613,7 +621,7 @@ async fn fetch_from_uri(uri: String) -> NitroCliResult<PathBuf> {
             let objects = client
                 .list_objects_v2()
                 .bucket(bucket)
-                .prefix(prefix)
+                .prefix(&arch_prefix)
                 .send()
                 .await
                 .map_err(|e| {
@@ -622,6 +630,7 @@ async fn fetch_from_uri(uri: String) -> NitroCliResult<PathBuf> {
 
             for object in objects.contents().unwrap_or_default() {
                 let key = object.key().unwrap();
+
                 let file_name = Path::new(key)
                     .file_name()
                     .and_then(|name| name.to_str())
@@ -649,13 +658,14 @@ async fn fetch_from_uri(uri: String) -> NitroCliResult<PathBuf> {
                         new_nitro_cli_failure!(&format!("Could not write content to download directory: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
                     }).ok_or_exit_with_errno(None);
             }
-
             Ok(PathBuf::from(BLOBS_DOWNLOAD_PATH))
         }
-        _ => return Err(new_nitro_cli_failure!("Unsupported URI: ",
-            NitroCliErrorEnum::BlobFetcherError)),
+        _ => {
+            Err(new_nitro_cli_failure!("Unsupported URI scheme", NitroCliErrorEnum::BlobFetcherError))
+        }
     }
 }
+
 
 
 /// Macro defining the arguments configuration for a *Nitro CLI* application.
