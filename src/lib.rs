@@ -28,6 +28,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{PathBuf,Path};
 use url::Url;
 use aws_sdk_s3::Client;
+use xz2::read::XzDecoder; 
 use std::env::consts::ARCH;
 use common::commands_parser::{BuildEnclavesArgs, EmptyArgs, FetchBlobsArgs, RunEnclavesArgs};
 use common::json_output::{
@@ -587,11 +588,19 @@ pub async fn fetch_binaries(arg: FetchBlobsArgs){
             }).ok_or_exit_with_errno(None);
         }
         FetchBlobsArgs::Version(version) => {
-            fetch_from_uri(format!("s3://nitro-binaries-test/releases/{version}/")).await
+            let base_prefix = format!("s3://nitro-binaries-test/releases/{version}/");
+            fetch_from_uri(base_prefix).await
             .map_err(|e|{
                 new_nitro_cli_failure!(&format!("Version mismatch: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
             }).ok_or_exit_with_errno(None);
         }
+    }
+}
+fn find_arch() -> &'static str {
+    match ARCH {
+        "x86_64" => "build-X64/x86_64",
+        "aarch64" => "build-ARM64/aarch64",
+        _ => ".",
     }
 }
 /// Fetching from specific URI that user provided.
@@ -607,57 +616,47 @@ async fn fetch_from_uri(uri: String) -> NitroCliResult<PathBuf> {
     match url.scheme() {
         "s3" => {
             let bucket = url.host_str().ok_or("No bucket specified").unwrap();
-            let base_prefix = url.path().trim_start_matches('/');  // "releases/1.3/"
-
-            let arch_prefix = match ARCH {
-                "x86_64" => format!("{base_prefix}build-X64/x86_64/"),
-                "aarch64" => format!("{base_prefix}build-ARM64/aarch64/"),
-                _ => return Err(new_nitro_cli_failure!("Unsupported architecture", NitroCliErrorEnum::BlobFetcherError))
-            };
-
+            let prefix = url.path().trim_start_matches('/');  // "releases/1.3/"
             let config = aws_config::from_env().load().await;
             let client = Client::new(&config);
 
-            let objects = client
-                .list_objects_v2()
+            let resp = client
+                .get_object()
                 .bucket(bucket)
-                .prefix(&arch_prefix)
+                .key(prefix)
                 .send()
                 .await
                 .map_err(|e| {
-                    new_nitro_cli_failure!(&format!("Could not list objects from s3: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+                    new_nitro_cli_failure!(&format!("Could not fetch from s3 URI {:?}", e), NitroCliErrorEnum::BlobFetcherError)
                 }).ok_or_exit_with_errno(None);
 
-            for object in objects.contents().unwrap_or_default() {
-                let key = object.key().unwrap();
+            let bytes = resp.body.collect().await
+                .map_err(|e| {
+                    new_nitro_cli_failure!(&format!("Could not read s3 storage: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+                }).ok_or_exit_with_errno(None);
+            let data = bytes.into_bytes();
+            let xz = XzDecoder::new(&data[..]);
+            let mut archive = tar::Archive::new(xz);
+            
+            let arch_path = find_arch();
 
-                let file_name = Path::new(key)
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or(key);
-                
-                let resp = client
-                    .get_object()
-                    .bucket(bucket)
-                    .key(key)
-                    .send()
-                    .await
-                    .map_err(|e| {
-                        new_nitro_cli_failure!(&format!("Could not fetch from s3 URI {:?}", e), NitroCliErrorEnum::BlobFetcherError)
-                    }).ok_or_exit_with_errno(None);
-
-                let bytes = resp.body.collect().await
-                    .map_err(|e| {
-                        new_nitro_cli_failure!(&format!("Could not read s3 storage: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
-                    }).ok_or_exit_with_errno(None);
-                let data = bytes.into_bytes();
-
-                let output_path = PathBuf::from(BLOBS_DOWNLOAD_PATH);
-                fs::write(&output_path.join(file_name), data)
-                    .map_err(|e| {
-                        new_nitro_cli_failure!(&format!("Could not write content to download directory: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
-                    }).ok_or_exit_with_errno(None);
-            }
+            archive.entries()
+            .map_err(|e| {
+                new_nitro_cli_failure!(&format!("Failed to read archive entries: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+            }).ok_or_exit_with_errno(None)
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path().map(|p| {
+                    let path_str = p.to_string_lossy();
+                    path_str.starts_with(&format!("enclaves-blobs/{arch_path}")) && !path_str.ends_with("/")
+                }).unwrap_or(false)
+            })
+            .for_each(|mut entry| {
+                let path = entry.path().unwrap();
+                let file_name = path.file_name().unwrap();
+                let target_path = Path::new(BLOBS_DOWNLOAD_PATH).join(file_name);
+                let _ = entry.unpack(&target_path);
+            });
             Ok(PathBuf::from(BLOBS_DOWNLOAD_PATH))
         }
         _ => {
