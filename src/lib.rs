@@ -659,6 +659,42 @@ async fn fetch_from_uri(uri: String) -> NitroCliResult<PathBuf> {
             });
             Ok(PathBuf::from(BLOBS_DOWNLOAD_PATH))
         }
+        "http" | "https" => {
+            let arch_url = uri.trim_end_matches('/');
+            let response = reqwest::get(arch_url)
+                .await
+                .map_err(|e| {
+                    new_nitro_cli_failure!(&format!("Failed to download from HTTP: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+                }).ok_or_exit_with_errno(None);
+            let bytes = response.bytes()
+                .await
+                .map_err(|e| {
+                    new_nitro_cli_failure!(&format!("Failed to read response body: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+                }).ok_or_exit_with_errno(None);
+
+            let xz = XzDecoder::new(&bytes[..]);
+            let mut archive = tar::Archive::new(xz);
+            
+            let arch_path = find_arch();
+            archive.entries()
+                .map_err(|e| {
+                    new_nitro_cli_failure!(&format!("Failed to read archive entries: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+                }).ok_or_exit_with_errno(None)
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.path().map(|p| {
+                        let path_str = p.to_string_lossy();
+                        path_str.starts_with(&format!("enclaves-blobs/{arch_path}")) && !path_str.ends_with("/")
+                    }).unwrap_or(false)
+                })
+                .for_each(|mut entry| {
+                    let path = entry.path().unwrap();
+                    let file_name = path.file_name().unwrap();
+                    let target_path = Path::new(BLOBS_DOWNLOAD_PATH).join(file_name);
+                    let _ = entry.unpack(&target_path);
+                });
+            Ok(PathBuf::from(BLOBS_DOWNLOAD_PATH))
+        },
         _ => {
             Err(new_nitro_cli_failure!("Unsupported URI scheme", NitroCliErrorEnum::BlobFetcherError))
         }
