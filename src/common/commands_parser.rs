@@ -1316,4 +1316,38 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "non_existing_config.json");
     }
+    #[test]
+    fn test_cannot_specify_both_uri_and_version(){
+        let app = create_app!();
+        let args = vec![
+            "nitro-cli",
+            "fetch-blobs",
+            "--URI",
+            "http://example.com",
+            "--version",
+            "2.2"
+        ];
+        let matches = app.try_get_matches_from(args);
+        let result = FetchBlobsArgs::new_with(matches
+            .as_ref()
+            .unwrap()
+            .subcommand_matches("fetch-blobs")
+            .unwrap());
+        assert!(result.is_err());
+    }
+    #[test]
+    fn test_must_provide_either_uri_or_version(){
+        let app = create_app!();
+        let args = vec![
+            "nitro-cli",
+            "fetch-blobs",
+        ];
+        let matches = app.try_get_matches_from(args);
+        let result = FetchBlobsArgs::new_with(matches
+            .as_ref()
+            .unwrap()
+            .subcommand_matches("fetch-blobs")
+            .unwrap());
+        assert!(result.is_err());
+    }
 }
