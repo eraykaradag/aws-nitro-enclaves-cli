@@ -27,6 +27,7 @@ use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{PathBuf,Path};
 use url::Url;
+use std::os::unix::fs::PermissionsExt; 
 use aws_sdk_s3::Client;
 use xz2::read::XzDecoder; 
 use std::env::consts::ARCH;
@@ -588,7 +589,7 @@ pub async fn fetch_binaries(arg: FetchBlobsArgs){
             }).ok_or_exit_with_errno(None);
         }
         FetchBlobsArgs::Version(version) => {
-            let base_prefix = format!("s3://nitro-binaries-test/releases/{version}/");
+            let base_prefix = format!("s3://nitro-binaries-test/releases/{version}/enclaves-blobs.txz");
             fetch_from_uri(base_prefix).await
             .map_err(|e|{
                 new_nitro_cli_failure!(&format!("Version mismatch: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
@@ -600,11 +601,41 @@ fn find_arch() -> &'static str {
     match ARCH {
         "x86_64" => "build-X64/x86_64",
         "aarch64" => "build-ARM64/aarch64",
-        _ => ".",
+        _ => ".",//TO:DO!
     }
 }
+fn unpack_blob_archive(data: bytes::Bytes) -> NitroCliResult<()>{
+    let xz = XzDecoder::new(&data[..]);
+    let mut archive = tar::Archive::new(xz);
+    
+    let arch_path = find_arch();
+
+    archive.entries()
+    .map_err(|e| {
+        new_nitro_cli_failure!(&format!("Failed to read archive entries: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+    }).ok_or_exit_with_errno(None)
+    .filter_map(|e| e.ok())
+    .filter(|e| {
+        e.path().map(|p| {
+            let path_str = p.to_string_lossy();
+            path_str.starts_with(&format!("enclaves-blobs/{arch_path}")) && !path_str.ends_with("/")
+        }).unwrap_or(false)
+    })
+    .for_each(|mut entry| {
+        let path = entry.path().unwrap();
+        let file_name = path.file_name().unwrap();
+        let target_path = Path::new(BLOBS_DOWNLOAD_PATH).join(file_name);
+        let _ = entry.unpack(&target_path);
+    });
+
+    fs::set_permissions(format!("{BLOBS_DOWNLOAD_PATH}/linuxkit",), fs::Permissions::from_mode(0o755))
+        .map_err(|e| {
+            new_nitro_cli_failure!(&format!("Could not set executable permissions: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+        }).ok_or_exit_with_errno(None);
+    Ok(())
+}
 /// Fetching from specific URI that user provided.
-async fn fetch_from_uri(uri: String) -> NitroCliResult<PathBuf> {
+async fn fetch_from_uri(uri: String) -> NitroCliResult<()> {
     let url = Url::parse(&uri).map_err(|e| {
         new_nitro_cli_failure!(&format!("Could not read the provided URI: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
     }).ok_or_exit_with_errno(None);
@@ -635,33 +666,17 @@ async fn fetch_from_uri(uri: String) -> NitroCliResult<PathBuf> {
                     new_nitro_cli_failure!(&format!("Could not read s3 storage: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
                 }).ok_or_exit_with_errno(None);
             let data = bytes.into_bytes();
-            let xz = XzDecoder::new(&data[..]);
-            let mut archive = tar::Archive::new(xz);
             
-            let arch_path = find_arch();
+            unpack_blob_archive(data)
+                .map_err(|e| {
+                    new_nitro_cli_failure!(&format!("Could not unpack blob archive: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+                }).ok_or_exit_with_errno(None);
 
-            archive.entries()
-            .map_err(|e| {
-                new_nitro_cli_failure!(&format!("Failed to read archive entries: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
-            }).ok_or_exit_with_errno(None)
-            .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path().map(|p| {
-                    let path_str = p.to_string_lossy();
-                    path_str.starts_with(&format!("enclaves-blobs/{arch_path}")) && !path_str.ends_with("/")
-                }).unwrap_or(false)
-            })
-            .for_each(|mut entry| {
-                let path = entry.path().unwrap();
-                let file_name = path.file_name().unwrap();
-                let target_path = Path::new(BLOBS_DOWNLOAD_PATH).join(file_name);
-                let _ = entry.unpack(&target_path);
-            });
-            Ok(PathBuf::from(BLOBS_DOWNLOAD_PATH))
+            Ok(())
         }
         "http" | "https" => {
-            let arch_url = uri.trim_end_matches('/');
-            let response = reqwest::get(arch_url)
+            let url = uri.trim_end_matches('/');
+            let response = reqwest::get(url)
                 .await
                 .map_err(|e| {
                     new_nitro_cli_failure!(&format!("Failed to download from HTTP: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
@@ -671,29 +686,12 @@ async fn fetch_from_uri(uri: String) -> NitroCliResult<PathBuf> {
                 .map_err(|e| {
                     new_nitro_cli_failure!(&format!("Failed to read response body: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
                 }).ok_or_exit_with_errno(None);
-
-            let xz = XzDecoder::new(&bytes[..]);
-            let mut archive = tar::Archive::new(xz);
             
-            let arch_path = find_arch();
-            archive.entries()
+            unpack_blob_archive(bytes)
                 .map_err(|e| {
-                    new_nitro_cli_failure!(&format!("Failed to read archive entries: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
-                }).ok_or_exit_with_errno(None)
-                .filter_map(|e| e.ok())
-                .filter(|e| {
-                    e.path().map(|p| {
-                        let path_str = p.to_string_lossy();
-                        path_str.starts_with(&format!("enclaves-blobs/{arch_path}")) && !path_str.ends_with("/")
-                    }).unwrap_or(false)
-                })
-                .for_each(|mut entry| {
-                    let path = entry.path().unwrap();
-                    let file_name = path.file_name().unwrap();
-                    let target_path = Path::new(BLOBS_DOWNLOAD_PATH).join(file_name);
-                    let _ = entry.unpack(&target_path);
-                });
-            Ok(PathBuf::from(BLOBS_DOWNLOAD_PATH))
+                    new_nitro_cli_failure!(&format!("Could not unpack blob archive: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+                }).ok_or_exit_with_errno(None);
+            Ok(())
         },
         _ => {
             Err(new_nitro_cli_failure!("Unsupported URI scheme", NitroCliErrorEnum::BlobFetcherError))

@@ -2484,6 +2484,7 @@ dependencies = [
  "aws-nitro-enclaves-image-format",
  "aws-sdk-s3",
  "bindgen",
+ "bytes",
  "chrono",
  "ciborium",
  "clap 4.4.18",
