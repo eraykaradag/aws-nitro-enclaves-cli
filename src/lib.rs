@@ -589,7 +589,7 @@ pub async fn fetch_binaries(arg: FetchBlobsArgs){
             }).ok_or_exit_with_errno(None);
         }
         FetchBlobsArgs::Version(version) => {
-            let base_prefix = format!("s3://nitro-binaries-test/releases/{version}/enclaves-blobs.txz");
+            let base_prefix = format!("s3://nitro-binaries-test/{version}/enclaves-blobs.txz");
             fetch_from_uri(base_prefix).await
             .map_err(|e|{
                 new_nitro_cli_failure!(&format!("Version mismatch: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
@@ -597,19 +597,10 @@ pub async fn fetch_binaries(arg: FetchBlobsArgs){
         }
     }
 }
-fn find_arch() -> &'static str {
-    match ARCH {
-        "x86_64" => "build-X64/x86_64",
-        "aarch64" => "build-ARM64/aarch64",
-        _ => ".",//TO:DO!
-    }
-}
 fn unpack_blob_archive(data: bytes::Bytes) -> NitroCliResult<()>{
     let xz = XzDecoder::new(&data[..]);
     let mut archive = tar::Archive::new(xz);
     
-    let arch_path = find_arch();
-
     archive.entries()
     .map_err(|e| {
         new_nitro_cli_failure!(&format!("Failed to read archive entries: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
@@ -618,7 +609,7 @@ fn unpack_blob_archive(data: bytes::Bytes) -> NitroCliResult<()>{
     .filter(|e| {
         e.path().map(|p| {
             let path_str = p.to_string_lossy();
-            path_str.starts_with(&format!("enclaves-blobs/{arch_path}")) && !path_str.ends_with("/")
+            path_str.starts_with(&format!("{ARCH}")) && !path_str.ends_with("/")
         }).unwrap_or(false)
     })
     .for_each(|mut entry| {
