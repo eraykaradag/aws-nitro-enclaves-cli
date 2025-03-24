@@ -28,7 +28,10 @@ use std::os::unix::net::UnixStream;
 use std::path::{PathBuf,Path};
 use url::Url;
 use std::os::unix::fs::PermissionsExt; 
-use aws_sdk_s3::Client;
+use futures_util::stream::StreamExt;
+use aws_sdk_s3::{Client,primitives::DateTimeFormat};
+use prettytable::{Table, row};
+use byte_unit::Byte;
 use xz2::read::XzDecoder; 
 use std::env::consts::ARCH;
 use common::commands_parser::{BuildEnclavesArgs, EmptyArgs, FetchBlobsArgs, RunEnclavesArgs};
@@ -53,7 +56,8 @@ pub const CID_TO_CONSOLE_PORT_OFFSET: u32 = 10000;
 const DEFAULT_BLOBS_PATH: &str = "/usr/share/nitro_enclaves/blobs/";
 /// Download path to be used to fetch binaries with `fetch-blobs` subcommand.
 const BLOBS_DOWNLOAD_PATH: &str = "/var/lib/nitro-cli/binaries";
-
+///Default S3 bucket which stores pre-built binaries.
+const DEFAULT_S3_BUCKET: &str = "nitro-binaries-test";
 /// Build an enclave image file with the provided arguments.
 pub fn build_enclaves(args: BuildEnclavesArgs) -> NitroCliResult<()> {
     debug!("build_enclaves");
@@ -589,7 +593,7 @@ pub async fn fetch_binaries(arg: FetchBlobsArgs){
             }).ok_or_exit_with_errno(None);
         }
         FetchBlobsArgs::Version(version) => {
-            let base_prefix = format!("s3://nitro-binaries-test/{version}/enclaves-blobs.txz");
+            let base_prefix = format!("s3://{DEFAULT_S3_BUCKET}/{version}/enclaves-blobs.txz");
             fetch_from_uri(base_prefix).await
             .map_err(|e|{
                 new_nitro_cli_failure!(&format!("Version mismatch: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
@@ -624,6 +628,61 @@ fn unpack_blob_archive(data: bytes::Bytes) -> NitroCliResult<()>{
             new_nitro_cli_failure!(&format!("Could not set executable permissions: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
         }).ok_or_exit_with_errno(None);
     Ok(())
+}
+///Lists default s3 bucket that contains pre-built binaries.
+pub async fn list_binaries() -> NitroCliResult<()>{//TODO! make output prettier
+    let url = Url::parse(&format!("s3://{DEFAULT_S3_BUCKET}/")).map_err(|e| {
+        new_nitro_cli_failure!(&format!("Could not read the provided URI: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+    }).ok_or_exit_with_errno(None);
+    
+    let bucket = url.host_str().ok_or("No bucket specified").unwrap();
+    let config = aws_config::from_env().load().await;
+    let client = Client::new(&config);
+    
+    let mut table = Table::new();
+    table.add_row(row![bFg->"Version", bFg->"Size", bFg->"Last Modified", bFg->"URI"]);
+    
+    let mut response = client
+        .list_objects_v2()
+        .bucket(bucket.to_owned())
+        .into_paginator()
+        .send();
+    
+    while let Some(result) = response.next().await {
+        match result {
+            Ok(output) => {
+                if let Some(contents) = output.contents() { 
+                    for object in contents {
+                        let version = object.key()
+                            .and_then(|key| key.split('/').nth(0))
+                            .unwrap_or("unknown");
+    
+                        let size = Byte::from_bytes(object.size() as u128)
+                            .get_appropriate_unit(true)
+                            .to_string();
+    
+                            let last_modified = object.last_modified()
+                            .map(|dt| dt.fmt(DateTimeFormat::DateTime).unwrap_or_default())
+                            .unwrap_or_default();
+    
+                        let uri = format!("s3://{}/{}", bucket, object.key().unwrap_or_default());
+                        
+                        table.add_row(row![
+                            version,
+                            size,
+                            last_modified,
+                            uri
+                        ]);
+                    }
+                }
+            }
+            Err(err) => return Err(new_nitro_cli_failure!(&format!("Could not list binaries. {:?}", err), NitroCliErrorEnum::BlobFetcherError)),
+        }
+    }
+    
+    table.printstd();
+    Ok(())
+
 }
 /// Fetching from specific URI that user provided.
 async fn fetch_from_uri(uri: String) -> NitroCliResult<()> {
@@ -858,12 +917,24 @@ macro_rules! create_app {
                         Arg::new("version")
                             .long("version")
                             .help("Version tag of requested binary version.")
+                            .required_unless_present_any(["URI","list"])
+                            .conflicts_with_all(["URI","list"])
                     )
                     .arg(
                         Arg::new("URI")
                             .long("URI")
-                            .help("URI of your binary storage."),
-                    ),
+                            .help("URI of your binary storage.")
+                            .required_unless_present_any(["list","version"])
+                            .conflicts_with_all(["list","version"])
+                    )
+                    .arg(
+                        Arg::new("list")
+                            .long("list")
+                            .action(clap::ArgAction::SetTrue)
+                            .help("The flag for listing default s3 bucket which contains pre-built binaries.")
+                            .required_unless_present_any(["URI","version"])
+                            .conflicts_with_all(["URI","version"])
+                        )
             )
             .subcommand(
                 Command::new("describe-eif")

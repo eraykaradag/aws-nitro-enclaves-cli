@@ -154,12 +154,13 @@ impl BuildEnclavesArgs {
     impl FetchBlobsArgs {
         /// Creating and matching arguments for `fetch-blobs` command.
         pub fn new_with(args: &ArgMatches) -> NitroCliResult<Self> {
-            match (args.get_one::<String>("URI"), args.get_one::<String>("version")) {
-                (Some(uri), None) => Ok(FetchBlobsArgs::Uri(uri.to_string())),
-                (None, Some(version)) => Ok(FetchBlobsArgs::Version(version.to_string())),
-                (Some(_), Some(_)) => Err(new_nitro_cli_failure!("Cannot specify both uri and version",NitroCliErrorEnum::ConflictingArgument)),
-                (None, None) => Err(new_nitro_cli_failure!("Either uri or version must be provided",NitroCliErrorEnum::MissingArgument)),
+            if let Some(uri) = args.get_one::<String>("URI") {
+                return Ok(FetchBlobsArgs::Uri(uri.to_string()));
             }
+            if let Some(version) = args.get_one::<String>("version") {
+                return Ok(FetchBlobsArgs::Version(version.to_string()));
+            }
+            Err( new_nitro_cli_failure!("Invalid arguments provided",NitroCliErrorEnum::MissingArgument))
         }
     }
 /// The arguments used by the `terminate-enclave` command.

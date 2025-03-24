@@ -9,6 +9,7 @@
 extern crate lazy_static;
 
 use clap::{Arg, Command};
+use futures_util::TryFutureExt;
 use log::info;
 use std::os::unix::net::UnixStream;
 
@@ -27,7 +28,7 @@ use nitro_cli::enclave_proc_comm::{
     enclave_proc_get_flags, enclave_proc_spawn, enclave_process_handle_all_replies,
 };
 use nitro_cli::{
-    build_enclaves, console_enclaves, create_app, describe_eif, fetch_binaries, get_all_enclave_names, get_file_pcr, new_enclave_name, new_nitro_cli_failure, terminate_all_enclaves
+    build_enclaves, console_enclaves, create_app, describe_eif, fetch_binaries, get_all_enclave_names, get_file_pcr, list_binaries, new_enclave_name, new_nitro_cli_failure, terminate_all_enclaves
 };
 
 const RUN_ENCLAVE_STR: &str = "Run Enclave";
@@ -41,6 +42,7 @@ const EXPLAIN_ERR_STR: &str = "Explain Error";
 const NEW_NAME_STR: &str = "New Enclave Name";
 const FILE_PCR_STR: &str = "File PCR";
 const FETCH_BLOBS_STR: &str = "Fetch Blobs";
+const LIST_BLOBS_STR: &str = "List Blobs";
 /// *Nitro CLI* application entry point.
 fn main() {
     let version_str = env!("CARGO_PKG_VERSION");
@@ -226,14 +228,22 @@ fn main() {
                 .ok_or_exit_with_errno(None);
         }
         Some(("fetch-blobs", args)) => {
-            let fetch_args = FetchBlobsArgs::new_with(args)
-                .map_err(|e|{
-                    e.add_subaction("Failed to construct FetchBlobs arguments".to_string())
-                        .set_action(FETCH_BLOBS_STR.to_string())
-                })
-                .ok_or_exit_with_errno(None);
             let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
-            rt.block_on(fetch_binaries(fetch_args));
+            if args.get_flag("list"){
+                rt.block_on(list_binaries().map_err(|e| {
+                    e.add_subaction("Failed to build enclave".to_string())
+                        .set_action(LIST_BLOBS_STR.to_string())
+                })).ok_or_exit_with_errno(None);
+            }
+            else{
+                let fetch_args = FetchBlobsArgs::new_with(args)
+                    .map_err(|e|{
+                        e.add_subaction("Failed to construct FetchBlobs arguments".to_string())
+                            .set_action(FETCH_BLOBS_STR.to_string())
+                    })
+                    .ok_or_exit_with_errno(None);
+                rt.block_on(fetch_binaries(fetch_args));
+            }
         }
         Some(("describe-eif", args)) => {
             let eif_path = args
