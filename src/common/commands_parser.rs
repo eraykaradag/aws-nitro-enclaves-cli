@@ -146,20 +146,37 @@ impl BuildEnclavesArgs {
 /// The arguments used by the `fetch-blobs` command.
 #[derive(Debug)]
     pub enum FetchBlobsArgs {
-        /// The URI of users binary storage.
-        Uri(String),
-        /// The version number of requested blobs.
-        Version(String),
+        ///Users can provide a URI that nitro-cli can fetch and if download_dir provided it will store them in there
+        Uri {
+            /// The URI of users binary storage.
+            uri: String,
+            /// User provided download directory
+            download_dir: Option<String>,
+        },
+        ///Users can provide a version number that nitro-cli can fetch from default S3 bucket and if download_dir provided it will store them in there
+        Version {
+            /// The version number of requested blobs.
+            version: String,
+            /// User provided download directory
+            download_dir: Option<String>,
+        },
     }
     impl FetchBlobsArgs {
         /// Creating and matching arguments for `fetch-blobs` command.
         pub fn new_with(args: &ArgMatches) -> NitroCliResult<Self> {
-            if let Some(uri) = args.get_one::<String>("URI") {
-                return Ok(FetchBlobsArgs::Uri(uri.to_string()));
-            }
-            if let Some(version) = args.get_one::<String>("version") {
-                return Ok(FetchBlobsArgs::Version(version.to_string()));
-            }
+            let download_dir = args.get_one::<String>("download-dir").map(|s| s.to_string());
+        if let Some(uri) = args.get_one::<String>("URI") {
+            return Ok(FetchBlobsArgs::Uri {
+                uri: uri.to_string(),
+                download_dir,
+            });
+        }
+        if let Some(version) = args.get_one::<String>("version") {
+            return Ok(FetchBlobsArgs::Version {
+                version: version.to_string(),
+                download_dir,
+            });
+        }
             Err( new_nitro_cli_failure!("Invalid arguments provided",NitroCliErrorEnum::MissingArgument))
         }
     }

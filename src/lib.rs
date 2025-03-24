@@ -587,21 +587,22 @@ pub fn get_file_pcr(path: String, pcr_type: PcrType) -> NitroCliResult<BTreeMap<
 ///Binary fetching mechanism for `fetch-blobs` subcommand.
 pub async fn fetch_binaries(arg: FetchBlobsArgs){
     match arg {
-        FetchBlobsArgs::Uri(uri) => {
-            fetch_from_uri(uri).await.map_err(|e|{
+        FetchBlobsArgs::Uri{uri, download_dir} => {
+            fetch_from_uri(uri,download_dir).await.map_err(|e|{
                 new_nitro_cli_failure!(&format!("Could not fetch from uri: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
             }).ok_or_exit_with_errno(None);
         }
-        FetchBlobsArgs::Version(version) => {
+        FetchBlobsArgs::Version{version,download_dir}=> {
             let base_prefix = format!("s3://{DEFAULT_S3_BUCKET}/{version}/enclaves-blobs.txz");
-            fetch_from_uri(base_prefix).await
+            fetch_from_uri(base_prefix,download_dir).await
             .map_err(|e|{
                 new_nitro_cli_failure!(&format!("Version mismatch: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
             }).ok_or_exit_with_errno(None);
         }
     }
 }
-fn unpack_blob_archive(data: bytes::Bytes) -> NitroCliResult<()>{
+fn unpack_blob_archive(data: bytes::Bytes, download_dir : String) -> NitroCliResult<()>{
+
     let xz = XzDecoder::new(&data[..]);
     let mut archive = tar::Archive::new(xz);
     
@@ -619,11 +620,11 @@ fn unpack_blob_archive(data: bytes::Bytes) -> NitroCliResult<()>{
     .for_each(|mut entry| {
         let path = entry.path().unwrap();
         let file_name = path.file_name().unwrap();
-        let target_path = Path::new(BLOBS_DOWNLOAD_PATH).join(file_name);
+        let target_path = Path::new(&download_dir).join(file_name);
         let _ = entry.unpack(&target_path);
     });
 
-    fs::set_permissions(format!("{BLOBS_DOWNLOAD_PATH}/linuxkit",), fs::Permissions::from_mode(0o755))
+    fs::set_permissions(format!("{download_dir}/linuxkit",), fs::Permissions::from_mode(0o755))
         .map_err(|e| {
             new_nitro_cli_failure!(&format!("Could not set executable permissions: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
         }).ok_or_exit_with_errno(None);
@@ -684,14 +685,25 @@ pub async fn list_binaries() -> NitroCliResult<()>{//TODO! make output prettier
     Ok(())
 
 }
+fn create_dir_for_binaries(download_dir: Option<String>) -> NitroCliResult<String>{
+    let output_dir = match download_dir {
+        Some(dir) => format!("{dir}/binaries/"),
+        None => BLOBS_DOWNLOAD_PATH.to_string(),
+    };
+    fs::create_dir_all(&output_dir).map_err(|e| {
+        new_nitro_cli_failure!(&format!("Could not create download directory: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+    }).ok_or_exit_with_errno(None);
+
+    Ok(output_dir)
+}
 /// Fetching from specific URI that user provided.
-async fn fetch_from_uri(uri: String) -> NitroCliResult<()> {
+async fn fetch_from_uri(uri: String, download_dir : Option<String>) -> NitroCliResult<()> {
     let url = Url::parse(&uri).map_err(|e| {
         new_nitro_cli_failure!(&format!("Could not read the provided URI: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
     }).ok_or_exit_with_errno(None);
 
-    fs::create_dir_all(BLOBS_DOWNLOAD_PATH).map_err(|e| {
-        new_nitro_cli_failure!(&format!("Could not create download directory: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+    let output_dir = create_dir_for_binaries(download_dir).map_err(|e| {
+        new_nitro_cli_failure!(&format!("Could not read the provided URI: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
     }).ok_or_exit_with_errno(None);
 
     match url.scheme() {
@@ -717,7 +729,7 @@ async fn fetch_from_uri(uri: String) -> NitroCliResult<()> {
                 }).ok_or_exit_with_errno(None);
             let data = bytes.into_bytes();
             
-            unpack_blob_archive(data)
+            unpack_blob_archive(data,output_dir)
                 .map_err(|e| {
                     new_nitro_cli_failure!(&format!("Could not unpack blob archive: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
                 }).ok_or_exit_with_errno(None);
@@ -737,7 +749,7 @@ async fn fetch_from_uri(uri: String) -> NitroCliResult<()> {
                     new_nitro_cli_failure!(&format!("Failed to read response body: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
                 }).ok_or_exit_with_errno(None);
             
-            unpack_blob_archive(bytes)
+            unpack_blob_archive(bytes,output_dir)
                 .map_err(|e| {
                     new_nitro_cli_failure!(&format!("Could not unpack blob archive: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
                 }).ok_or_exit_with_errno(None);
@@ -932,9 +944,18 @@ macro_rules! create_app {
                             .long("list")
                             .action(clap::ArgAction::SetTrue)
                             .help("The flag for listing default s3 bucket which contains pre-built binaries.")
-                            .required_unless_present_any(["URI","version"])
-                            .conflicts_with_all(["URI","version"])
+                            .required_unless_present_any(["URI","version","download-dir"])
+                            .conflicts_with_all(["URI","version","download-dir"])
                         )
+                    .arg(
+                        Arg::new("download-dir")
+                            .long("download-dir")
+                            .help("User specified download directory. In case user want to use multiple versions of binaries.")
+                            .conflicts_with("list")
+                            .required_unless_present("list")
+                            .requires("URI")
+                            .requires("version")
+                    )
             )
             .subcommand(
                 Command::new("describe-eif")
