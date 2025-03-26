@@ -599,6 +599,13 @@ pub async fn fetch_binaries(arg: FetchBlobsArgs){
                 new_nitro_cli_failure!(&format!("Version mismatch: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
             }).ok_or_exit_with_errno(None);
         }
+        FetchBlobsArgs::Latest{download_dir} => {
+            let base_prefix = format!("s3://{DEFAULT_S3_BUCKET}/latest/enclaves-blobs.txz");
+            fetch_from_uri(base_prefix,download_dir).await
+            .map_err(|e|{
+                new_nitro_cli_failure!(&format!("Version mismatch: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+            }).ok_or_exit_with_errno(None);
+        }
     }
 }
 fn unpack_blob_archive(data: bytes::Bytes, download_dir : String) -> NitroCliResult<()>{
@@ -929,14 +936,12 @@ macro_rules! create_app {
                         Arg::new("version")
                             .long("version")
                             .help("Version tag of requested binary version.")
-                            .required_unless_present_any(["URI","list"])
                             .conflicts_with_all(["URI","list"])
                     )
                     .arg(
                         Arg::new("URI")
                             .long("URI")
                             .help("URI of your binary storage.")
-                            .required_unless_present_any(["list","version"])
                             .conflicts_with_all(["list","version"])
                     )
                     .arg(
@@ -944,7 +949,6 @@ macro_rules! create_app {
                             .long("list")
                             .action(clap::ArgAction::SetTrue)
                             .help("The flag for listing default s3 bucket which contains pre-built binaries.")
-                            .required_unless_present_any(["URI","version","download-dir"])
                             .conflicts_with_all(["URI","version","download-dir"])
                         )
                     .arg(
@@ -952,9 +956,6 @@ macro_rules! create_app {
                             .long("download-dir")
                             .help("User specified download directory. In case user want to use multiple versions of binaries.")
                             .conflicts_with("list")
-                            .required_unless_present("list")
-                            .requires("URI")
-                            .requires("version")
                     )
             )
             .subcommand(
