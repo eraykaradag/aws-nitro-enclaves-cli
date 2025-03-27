@@ -161,10 +161,7 @@ impl BuildEnclavesArgs {
             download_dir: Option<String>,
         },
         ///If user does not provide URI or version it will pull the latest from our default storage.
-        Latest{
-            /// User provided download directory
-            download_dir: Option<String>,
-        }
+        Latest(Option<String>),
     }
     impl FetchBlobsArgs {
         /// Creating and matching arguments for `fetch-blobs` command.
@@ -182,9 +179,7 @@ impl BuildEnclavesArgs {
                     download_dir,
                 });
             }
-            Ok(FetchBlobsArgs::Latest{
-                download_dir,
-            })
+            Ok(FetchBlobsArgs::Latest(download_dir))
         }
     }
 /// The arguments used by the `terminate-enclave` command.
