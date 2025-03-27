@@ -599,7 +599,7 @@ pub async fn fetch_binaries(arg: FetchBlobsArgs){
                 new_nitro_cli_failure!(&format!("Version mismatch: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
             }).ok_or_exit_with_errno(None);
         }
-        FetchBlobsArgs::Latest{download_dir} => {
+        FetchBlobsArgs::Latest(download_dir) => {
             let base_prefix = format!("s3://{DEFAULT_S3_BUCKET}/latest/enclaves-blobs.txz");
             fetch_from_uri(base_prefix,download_dir).await
             .map_err(|e|{
@@ -715,27 +715,8 @@ async fn fetch_from_uri(uri: String, download_dir : Option<String>) -> NitroCliR
 
     match url.scheme() {
         "s3" => {
-            let bucket = url.host_str().ok_or("No bucket specified").unwrap();
-            let prefix = url.path().trim_start_matches('/');  // "releases/1.3/"
-            let config = aws_config::from_env().load().await;
-            let client = Client::new(&config);
+            let data = fetch_from_s3(url).await;
 
-            let resp = client
-                .get_object()
-                .bucket(bucket)
-                .key(prefix)
-                .send()
-                .await
-                .map_err(|e| {
-                    new_nitro_cli_failure!(&format!("Could not fetch from s3 URI {:?}", e), NitroCliErrorEnum::BlobFetcherError)
-                }).ok_or_exit_with_errno(None);
-
-            let bytes = resp.body.collect().await
-                .map_err(|e| {
-                    new_nitro_cli_failure!(&format!("Could not read s3 storage: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
-                }).ok_or_exit_with_errno(None);
-            let data = bytes.into_bytes();
-            
             unpack_blob_archive(data,output_dir)
                 .map_err(|e| {
                     new_nitro_cli_failure!(&format!("Could not unpack blob archive: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
@@ -744,18 +725,8 @@ async fn fetch_from_uri(uri: String, download_dir : Option<String>) -> NitroCliR
             Ok(())
         }
         "http" | "https" => {
-            let url = uri.trim_end_matches('/');
-            let response = reqwest::get(url)
-                .await
-                .map_err(|e| {
-                    new_nitro_cli_failure!(&format!("Failed to download from HTTP: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
-                }).ok_or_exit_with_errno(None);
-            let bytes = response.bytes()
-                .await
-                .map_err(|e| {
-                    new_nitro_cli_failure!(&format!("Failed to read response body: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
-                }).ok_or_exit_with_errno(None);
             
+            let bytes = fetch_from_http(uri).await;
             unpack_blob_archive(bytes,output_dir)
                 .map_err(|e| {
                     new_nitro_cli_failure!(&format!("Could not unpack blob archive: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
@@ -767,8 +738,45 @@ async fn fetch_from_uri(uri: String, download_dir : Option<String>) -> NitroCliR
         }
     }
 }
+async fn fetch_from_s3(url: Url) -> bytes::Bytes{
+    let bucket = url.host_str().ok_or("No bucket specified").unwrap();
+    let prefix = url.path().trim_start_matches('/');  // "releases/1.3/"
+    let config = aws_config::from_env().load().await;
+    let client = Client::new(&config);
 
+    let resp = client
+        .get_object()
+        .bucket(bucket)
+        .key(prefix)
+        .send()
+        .await
+        .map_err(|e| {
+            new_nitro_cli_failure!(&format!("Could not fetch from s3 URI {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+        }).ok_or_exit_with_errno(None);
 
+    let bytes = resp.body.collect().await
+        .map_err(|e| {
+            new_nitro_cli_failure!(&format!("Could not read s3 storage: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+        }).ok_or_exit_with_errno(None);
+
+    bytes.into_bytes()
+}
+
+async fn fetch_from_http(uri: String) -> bytes::Bytes{
+    let url = uri.trim_end_matches('/');
+    let response = reqwest::get(url)
+        .await
+        .map_err(|e| {
+            new_nitro_cli_failure!(&format!("Failed to download from HTTP: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+        }).ok_or_exit_with_errno(None);
+    let bytes = response.bytes()
+        .await
+        .map_err(|e| {
+            new_nitro_cli_failure!(&format!("Failed to read response body: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+        }).ok_or_exit_with_errno(None);
+
+    bytes
+}
 
 /// Macro defining the arguments configuration for a *Nitro CLI* application.
 #[macro_export]
