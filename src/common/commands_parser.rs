@@ -114,6 +114,8 @@ pub struct BuildEnclavesArgs {
     pub img_version: Option<String>,
     /// The path to custom metadata JSON file
     pub metadata: Option<String>,
+    /// The name of binary set
+    pub blobs_name: Option<String>,
 }
 
 impl BuildEnclavesArgs {
@@ -140,6 +142,7 @@ impl BuildEnclavesArgs {
             img_name: parse_image_name(args),
             img_version: parse_image_version(args),
             metadata: parse_metadata(args),
+            blobs_name: parse_blobs_name(args),
         })
     }
 }
@@ -570,6 +573,9 @@ fn parse_image_version(args: &ArgMatches) -> Option<String> {
 
 fn parse_metadata(args: &ArgMatches) -> Option<String> {
     args.get_one::<String>("metadata").map(String::from)
+}
+fn parse_blobs_name(args: &ArgMatches) -> Option<String> {
+    args.get_one::<String>("blobs-name").map(String::from)
 }
 
 fn parse_error_code_str(args: &ArgMatches) -> NitroCliResult<String> {

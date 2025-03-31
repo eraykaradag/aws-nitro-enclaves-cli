@@ -71,6 +71,7 @@ pub fn build_enclaves(args: BuildEnclavesArgs) -> NitroCliResult<()> {
         &args.img_name,
         &args.img_version,
         &args.metadata,
+        args.blobs_name,
     )
     .map_err(|e| e.add_subaction("Failed to build EIF from docker".to_string()))?;
     Ok(())
@@ -86,9 +87,10 @@ pub fn build_from_docker(
     img_name: &Option<String>,
     img_version: &Option<String>,
     metadata_path: &Option<String>,
+    blobs_name: Option<String>,
 ) -> NitroCliResult<(File, BTreeMap<String, String>)> {
     let blobs_path =
-        blobs_path().map_err(|e| e.add_subaction("Failed to retrieve blobs path".to_string()))?;
+        blobs_path(blobs_name).map_err(|e| e.add_subaction("Failed to retrieve blobs path".to_string()))?;
     let cmdline_file_path = format!("{}/cmdline", blobs_path);
     let mut cmdline_file = File::open(cmdline_file_path.clone()).map_err(|e| {
         new_nitro_cli_failure!(
@@ -311,12 +313,12 @@ pub fn describe_eif(eif_path: String) -> NitroCliResult<EifDescribeInfo> {
 /// - *init*: The initial init process that is bootstraping the environment.
 /// - *linuxkit*: A slightly modified version of linuxkit.
 /// - *cmdline*: A file containing the kernel commandline.
-fn blobs_path() -> NitroCliResult<String> {
+fn blobs_path(blobs_name: Option<String>) -> NitroCliResult<String> {
     // TODO Improve error message with a suggestion to the user
     // consider using the default path used by rpm install
     let blobs_res = std::env::var("NITRO_CLI_BLOBS");
-    if Path::new(BLOBS_DOWNLOAD_PATH).exists() {
-        return Ok(blobs_res.unwrap_or_else(|_| BLOBS_DOWNLOAD_PATH.to_string()));
+    if let Some(blobs_name) = blobs_name {
+        return Ok(blobs_res.unwrap_or_else(|_| format!("{BLOBS_DOWNLOAD_PATH}/{blobs_name}/").to_string()));
     }
     Ok(blobs_res.unwrap_or_else(|_| DEFAULT_BLOBS_PATH.to_string()))
 }
@@ -927,6 +929,11 @@ macro_rules! create_app {
                         Arg::new("metadata")
                             .long("metadata")
                             .help("Path to JSON containing the custom metadata provided by the user."),
+                    )
+                    .arg(
+                        Arg::new("blobs-name")
+                            .long("blobs-name")
+                            .help("The name of the requested binary set.")
                     ),
             )
             .subcommand(
