@@ -84,6 +84,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         assert!(build_enclaves(args).is_err());
@@ -103,6 +104,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         let measurements = build_from_docker(
@@ -114,6 +116,7 @@ mod tests {
             &args.img_name,
             &args.img_version,
             &args.metadata,
+            args.blobs_name,
         )
         .expect("Docker build failed")
         .1;
@@ -145,6 +148,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -156,6 +160,7 @@ mod tests {
             &args.img_name,
             &args.img_version,
             &args.metadata,
+            args.blobs_name,
         )
         .expect("Docker build failed");
     }
@@ -174,6 +179,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -185,6 +191,7 @@ mod tests {
             &args.img_name,
             &args.img_version,
             &args.metadata,
+            args.blobs_name,
         )
         .expect("Docker build failed");
     }
@@ -249,6 +256,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         let measurements = build_from_docker(
@@ -260,6 +268,7 @@ mod tests {
             &args.img_name,
             &args.img_version,
             &args.metadata,
+            args.blobs_name,
         )
         .expect("Docker build failed")
         .1;
@@ -292,6 +301,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None
         };
 
         build_from_docker(
@@ -303,6 +313,7 @@ mod tests {
             &build_args.img_name,
             &build_args.img_version,
             &build_args.metadata,
+            build_args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -338,6 +349,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -349,6 +361,7 @@ mod tests {
             &build_args.img_name,
             &build_args.img_version,
             &build_args.metadata,
+            build_args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -379,6 +392,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -390,6 +404,7 @@ mod tests {
             &build_args.img_name,
             &build_args.img_version,
             &build_args.metadata,
+            build_args.blobs_name
         )
         .expect("Docker build failed");
 
@@ -486,6 +501,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -497,6 +513,7 @@ mod tests {
             &build_args.img_name,
             &build_args.img_version,
             &build_args.metadata,
+            build_args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -528,6 +545,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -539,6 +557,7 @@ mod tests {
             &build_args.img_name,
             &build_args.img_version,
             &build_args.metadata,
+            build_args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -590,6 +609,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -601,6 +621,7 @@ mod tests {
             &build_args.img_name,
             &build_args.img_version,
             &build_args.metadata,
+            build_args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -680,6 +701,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -691,6 +713,7 @@ mod tests {
             &args.img_name,
             &args.img_version,
             &args.metadata,
+            args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -771,6 +794,7 @@ mod tests {
             img_name: Some("TestName".to_string()),
             img_version: Some("1.0".to_string()),
             metadata: Some(meta_path.to_str().unwrap().to_string()),
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -782,6 +806,7 @@ mod tests {
             &args.img_name,
             &args.img_version,
             &args.metadata,
+            args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -865,6 +890,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -876,6 +902,7 @@ mod tests {
             &args.img_name,
             &args.img_version,
             &args.metadata,
+            args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -964,6 +991,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -975,6 +1003,7 @@ mod tests {
             &args.img_name,
             &args.img_version,
             &args.metadata,
+            args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -1006,6 +1035,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -1017,6 +1047,7 @@ mod tests {
             &args.img_name,
             &args.img_version,
             &args.metadata,
+            args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -1048,6 +1079,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -1059,6 +1091,7 @@ mod tests {
             &args.img_name,
             &args.img_version,
             &args.metadata,
+            args.blobs_name,
         )
         .expect("Docker build failed");
 
