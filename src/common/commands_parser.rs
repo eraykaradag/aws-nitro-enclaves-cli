@@ -150,36 +150,36 @@ impl BuildEnclavesArgs {
         Uri {
             /// The URI of users binary storage.
             uri: String,
-            /// User provided download directory
-            download_dir: Option<String>,
+            /// The name of binary set
+            name: String,
         },
         ///Users can provide a version number that nitro-cli can fetch from default S3 bucket and if download_dir provided it will store them in there
         Version {
             /// The version number of requested blobs.
             version: String,
-            /// User provided download directory
-            download_dir: Option<String>,
+            /// The name of binary set
+            name: String,
         },
-        ///If user does not provide URI or version it will pull the latest from our default storage.
-        Latest(Option<String>),
     }
     impl FetchBlobsArgs {
         /// Creating and matching arguments for `fetch-blobs` command.
         pub fn new_with(args: &ArgMatches) -> NitroCliResult<Self> {
-            let download_dir = args.get_one::<String>("download-dir").map(|s| s.to_string());
+            let name = args.get_one::<String>("blobs-name")
+                .ok_or(new_nitro_cli_failure!("Name of binary set must be provided",NitroCliErrorEnum::InvalidArgument))
+                .map(|s| s.to_string())?;
             if let Some(uri) = args.get_one::<String>("URI") {
                 return Ok(FetchBlobsArgs::Uri {
                     uri: uri.to_string(),
-                    download_dir,
+                    name,
                 });
             }
             if let Some(version) = args.get_one::<String>("version") {
                 return Ok(FetchBlobsArgs::Version {
                     version: version.to_string(),
-                    download_dir,
+                    name,
                 });
             }
-            Ok(FetchBlobsArgs::Latest(download_dir))
+            Err( new_nitro_cli_failure!("Invalid arguments provided",NitroCliErrorEnum::MissingArgument))
         }
     }
 /// The arguments used by the `terminate-enclave` command.

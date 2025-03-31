@@ -587,21 +587,14 @@ pub fn get_file_pcr(path: String, pcr_type: PcrType) -> NitroCliResult<BTreeMap<
 ///Binary fetching mechanism for `fetch-blobs` subcommand.
 pub async fn fetch_binaries(arg: FetchBlobsArgs){
     match arg {
-        FetchBlobsArgs::Uri{uri, download_dir} => {
-            fetch_from_uri(uri,download_dir).await.map_err(|e|{
+        FetchBlobsArgs::Uri{uri, name} => {
+            fetch_from_uri(uri,name).await.map_err(|e|{
                 new_nitro_cli_failure!(&format!("Could not fetch from uri: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
             }).ok_or_exit_with_errno(None);
         }
-        FetchBlobsArgs::Version{version,download_dir}=> {
+        FetchBlobsArgs::Version{version,name}=> {
             let base_prefix = format!("s3://{DEFAULT_S3_BUCKET}/{version}/enclaves-blobs.txz");
-            fetch_from_uri(base_prefix,download_dir).await
-            .map_err(|e|{
-                new_nitro_cli_failure!(&format!("Version mismatch: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
-            }).ok_or_exit_with_errno(None);
-        }
-        FetchBlobsArgs::Latest(download_dir) => {
-            let base_prefix = format!("s3://{DEFAULT_S3_BUCKET}/latest/enclaves-blobs.txz");
-            fetch_from_uri(base_prefix,download_dir).await
+            fetch_from_uri(base_prefix,name).await
             .map_err(|e|{
                 new_nitro_cli_failure!(&format!("Version mismatch: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
             }).ok_or_exit_with_errno(None);
@@ -687,16 +680,15 @@ pub async fn list_binaries() -> NitroCliResult<()>{//TODO! make output prettier
             Err(err) => return Err(new_nitro_cli_failure!(&format!("Could not list binaries. {:?}", err), NitroCliErrorEnum::BlobFetcherError)),
         }
     }
-    
     table.printstd();
     Ok(())
-
 }
-fn create_dir_for_binaries(download_dir: Option<String>) -> NitroCliResult<String>{
-    let output_dir = match download_dir {
-        Some(dir) => format!("{dir}/binaries/"),
-        None => BLOBS_DOWNLOAD_PATH.to_string(),
-    };
+fn create_dir_for_binaries(name: String) -> NitroCliResult<String>{
+    let output_dir = format!("{BLOBS_DOWNLOAD_PATH}/{name}/");
+    //TO:DO CHECK IF DIRECTORY EXIST
+    if Path::new(&output_dir).exists(){
+        return Err(new_nitro_cli_failure!(&format!("Provided name of the binary set is already exist."), NitroCliErrorEnum::BlobFetcherError));
+    }
     fs::create_dir_all(&output_dir).map_err(|e| {
         new_nitro_cli_failure!(&format!("Could not create download directory: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
     }).ok_or_exit_with_errno(None);
@@ -704,12 +696,12 @@ fn create_dir_for_binaries(download_dir: Option<String>) -> NitroCliResult<Strin
     Ok(output_dir)
 }
 /// Fetching from specific URI that user provided.
-async fn fetch_from_uri(uri: String, download_dir : Option<String>) -> NitroCliResult<()> {
+async fn fetch_from_uri(uri: String, name : String) -> NitroCliResult<()> {
     let url = Url::parse(&uri).map_err(|e| {
         new_nitro_cli_failure!(&format!("Could not read the provided URI: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
     }).ok_or_exit_with_errno(None);
 
-    let output_dir = create_dir_for_binaries(download_dir).map_err(|e| {
+    let output_dir = create_dir_for_binaries(name).map_err(|e| {
         new_nitro_cli_failure!(&format!("Could not read the provided URI: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
     }).ok_or_exit_with_errno(None);
 
@@ -957,12 +949,14 @@ macro_rules! create_app {
                             .long("list")
                             .action(clap::ArgAction::SetTrue)
                             .help("The flag for listing default s3 bucket which contains pre-built binaries.")
-                            .conflicts_with_all(["URI","version","download-dir"])
+                            .conflicts_with_all(["URI","version","blobs-name"])
                         )
                     .arg(
-                        Arg::new("download-dir")
-                            .long("download-dir")
-                            .help("User specified download directory. In case user want to use multiple versions of binaries.")
+                        Arg::new("blobs-name")
+                            .long("blobs-name")
+                            .help("Name of the binary set. Provided by the user")
+                            .requires("URI")
+                            .requires("version")
                             .conflicts_with("list")
                     )
             )
