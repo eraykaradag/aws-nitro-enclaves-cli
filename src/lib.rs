@@ -34,9 +34,10 @@ use prettytable::{Table, row};
 use byte_unit::Byte;
 use xz2::read::XzDecoder; 
 use std::env::consts::ARCH;
+use chrono::Utc;
 use common::commands_parser::{BuildEnclavesArgs, EmptyArgs, FetchBlobsArgs, RunEnclavesArgs};
 use common::json_output::{
-    EifDescribeInfo, EnclaveBuildInfo, EnclaveTerminateInfo, MetadataDescribeInfo,
+    EifDescribeInfo, EnclaveBuildInfo, EnclaveTerminateInfo, MetadataDescribeInfo, EnclaveBlobsMetadata
 };
 use common::{enclave_proc_command_send_single, get_sockets_dir_path, ExitGracefully};
 use common::{EnclaveProcessCommandType, NitroCliErrorEnum, NitroCliFailure, NitroCliResult};
@@ -603,7 +604,7 @@ pub async fn fetch_binaries(arg: FetchBlobsArgs){
         }
     }
 }
-fn unpack_blob_archive(data: bytes::Bytes, download_dir : String) -> NitroCliResult<()>{
+fn unpack_blob_archive(data: bytes::Bytes, download_dir : &String) -> NitroCliResult<()>{
 
     let xz = XzDecoder::new(&data[..]);
     let mut archive = tar::Archive::new(xz);
@@ -630,6 +631,8 @@ fn unpack_blob_archive(data: bytes::Bytes, download_dir : String) -> NitroCliRes
         .map_err(|e| {
             new_nitro_cli_failure!(&format!("Could not set executable permissions: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
         }).ok_or_exit_with_errno(None);
+    
+
     Ok(())
 }
 ///Lists default s3 bucket that contains pre-built binaries.
@@ -711,20 +714,27 @@ async fn fetch_from_uri(uri: String, name : String) -> NitroCliResult<()> {
         "s3" => {
             let data = fetch_from_s3(url).await;
 
-            unpack_blob_archive(data,output_dir)
+            unpack_blob_archive(data,&output_dir)
                 .map_err(|e| {
                     new_nitro_cli_failure!(&format!("Could not unpack blob archive: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
                 }).ok_or_exit_with_errno(None);
+
+            create_blobs_metadata(uri, output_dir).map_err(|e| {
+                new_nitro_cli_failure!(&format!("Could not create metadata for fetched blobs: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+            }).ok_or_exit_with_errno(None);
 
             Ok(())
         }
         "http" | "https" => {
             
-            let bytes = fetch_from_http(uri).await;
-            unpack_blob_archive(bytes,output_dir)
+            let bytes = fetch_from_http(&uri).await;
+            unpack_blob_archive(bytes,&output_dir)
                 .map_err(|e| {
                     new_nitro_cli_failure!(&format!("Could not unpack blob archive: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
                 }).ok_or_exit_with_errno(None);
+            create_blobs_metadata(uri, output_dir).map_err(|e| {
+                new_nitro_cli_failure!(&format!("Could not create metadata for fetched blobs: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+            }).ok_or_exit_with_errno(None);
             Ok(())
         },
         _ => {
@@ -756,7 +766,7 @@ async fn fetch_from_s3(url: Url) -> bytes::Bytes{
     bytes.into_bytes()
 }
 
-async fn fetch_from_http(uri: String) -> bytes::Bytes{
+async fn fetch_from_http(uri: &String) -> bytes::Bytes{
     let url = uri.trim_end_matches('/');
     let response = reqwest::get(url)
         .await
@@ -771,7 +781,19 @@ async fn fetch_from_http(uri: String) -> bytes::Bytes{
 
     bytes
 }
-
+fn create_blobs_metadata(uri: String,output_dir: String) -> NitroCliResult<()>{
+    let metadata = EnclaveBlobsMetadata {
+        source: uri,
+        date: Utc::now().to_string(),
+    };
+    let json = serde_json::to_string_pretty(&metadata).map_err(|e| {
+        new_nitro_cli_failure!(&format!("Could not serialize metadata: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+        }).ok_or_exit_with_errno(None);
+    fs::write(format!("{output_dir}/.metadata.json"), json).map_err(|e| {
+        new_nitro_cli_failure!(&format!("Could not create metadata: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
+        }).ok_or_exit_with_errno(None);
+    Ok(())
+}
 /// Macro defining the arguments configuration for a *Nitro CLI* application.
 #[macro_export]
 macro_rules! create_app {
@@ -943,12 +965,14 @@ macro_rules! create_app {
                         Arg::new("version")
                             .long("version")
                             .help("Version tag of requested binary version.")
+                            .requires("blobs-name")
                             .conflicts_with_all(["URI","list"])
                     )
                     .arg(
                         Arg::new("URI")
                             .long("URI")
-                            .help("URI of your binary storage.")
+                            .help("URI of remote binary storage.")
+                            .requires("blobs-name")
                             .conflicts_with_all(["list","version"])
                     )
                     .arg(

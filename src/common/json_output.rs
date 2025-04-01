@@ -260,3 +260,11 @@ impl MetadataDescribeInfo {
         }
     }
 }
+/// Metadata to inform users about the binaries they fetched.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct EnclaveBlobsMetadata {
+    ///Download uri of the blobs
+    pub source: String,
+    ///Download date of the blobs
+    pub date: String,
+}
