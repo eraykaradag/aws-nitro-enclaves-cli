@@ -231,7 +231,7 @@ fn main() {
             let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
             if args.get_flag("list"){
                 rt.block_on(list_binaries().map_err(|e| {
-                    e.add_subaction("Failed to build enclave".to_string())
+                    e.add_subaction("Failed to list upstream binaries.".to_string())
                         .set_action(LIST_BLOBS_STR.to_string())
                 })).ok_or_exit_with_errno(None);
             }
@@ -242,7 +242,13 @@ fn main() {
                             .set_action(FETCH_BLOBS_STR.to_string())
                     })
                     .ok_or_exit_with_errno(None);
-                rt.block_on(fetch_binaries(fetch_args));
+                rt.block_on(
+                    fetch_binaries(fetch_args)
+                    .map_err(|e|{
+                        e.add_subaction("Failed to fetch binaries".to_string())
+                            .set_action(FETCH_BLOBS_STR.to_string())
+                    })
+                ).ok_or_exit_with_errno(None);
             }
         }
         Some(("describe-eif", args)) => {
