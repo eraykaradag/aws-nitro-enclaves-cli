@@ -609,7 +609,6 @@ pub async fn fetch_binaries(arg: FetchBlobsArgs) -> NitroCliResult<()>{
     Ok(())
 }
 fn clear_dir_on_fail(name: String) -> NitroCliResult<()>{
-    println!("fail reached");
     let output_dir = format!("{BLOBS_DOWNLOAD_PATH}/{name}/");
     fs::remove_dir_all(&output_dir).map_err(|e| {
         new_nitro_cli_failure!(&format!("Could not remove download directory: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
@@ -658,7 +657,7 @@ pub async fn list_binaries() -> NitroCliResult<()>{
     let client = Client::new(&config);
     
     let mut table = Table::new();
-    table.add_row(row![bFg->"Version", bFg->"Size", bFg->"Last Modified", bFg->"URI"]);
+    table.add_row(row![bFg->"Version", bFg->"Size", bFg->"Last Modified", bFg->"URI", bFg->"Location"]);
     
     let mut response = client
         .list_objects_v2()
@@ -685,11 +684,13 @@ pub async fn list_binaries() -> NitroCliResult<()>{
     
                         let uri = format!("s3://{}/{}", bucket, object.key().unwrap_or_default());
                         
+                        let location = is_binary_exist(uri.clone())?;
                         table.add_row(row![
                             version,
                             size,
                             last_modified,
-                            uri
+                            uri,
+                            location
                         ]);
                     }
                 }
@@ -699,6 +700,25 @@ pub async fn list_binaries() -> NitroCliResult<()>{
     }
     table.printstd();
     Ok(())
+}
+fn is_binary_exist(uri: String) -> NitroCliResult<String>{
+    if let Ok(entries) = fs::read_dir(BLOBS_DOWNLOAD_PATH){
+        for entry in entries{
+            if let Ok(entry) = entry{
+                let file_name = entry.file_name();
+                let f = std::fs::File::open(format!("{}/{}/.metadata.json",BLOBS_DOWNLOAD_PATH,file_name.to_string_lossy())).unwrap();
+                let metadata: EnclaveBlobsMetadata = serde_json::from_reader(f).unwrap();
+
+                if metadata.source == uri {
+                    return Ok(format!("{}/{}",BLOBS_DOWNLOAD_PATH,file_name.to_string_lossy()));
+                }
+            }
+        }
+    }
+    else{
+        return Err(new_nitro_cli_failure!(&format!("Blobs download path not found or corrupted."), NitroCliErrorEnum::BlobFetcherError));
+    }
+    return Ok("".to_string())
 }
 fn create_dir_for_binaries(name: String) -> NitroCliResult<String>{
     let output_dir = format!("{BLOBS_DOWNLOAD_PATH}/{name}/");
