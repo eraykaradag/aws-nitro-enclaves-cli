@@ -114,6 +114,8 @@ pub struct BuildEnclavesArgs {
     pub img_version: Option<String>,
     /// The path to custom metadata JSON file
     pub metadata: Option<String>,
+    /// The name of binary set
+    pub blobs_name: Option<String>,
 }
 
 impl BuildEnclavesArgs {
@@ -140,10 +142,49 @@ impl BuildEnclavesArgs {
             img_name: parse_image_name(args),
             img_version: parse_image_version(args),
             metadata: parse_metadata(args),
+            blobs_name: parse_blobs_name(args),
         })
     }
 }
-
+/// The arguments used by the `fetch-blobs` command.
+#[derive(Debug)]
+    pub enum FetchBlobsArgs {
+        ///Users can provide a URI that nitro-cli can fetch and if download_dir provided it will store them in there
+        Uri {
+            /// The URI of users binary storage.
+            uri: String,
+            /// The name of binary set
+            name: String,
+        },
+        ///Users can provide a version number that nitro-cli can fetch from default S3 bucket and if download_dir provided it will store them in there
+        Version {
+            /// The version number of requested blobs.
+            version: String,
+            /// The name of binary set
+            name: String,
+        },
+    }
+    impl FetchBlobsArgs {
+        /// Creating and matching arguments for `fetch-blobs` command.
+        pub fn new_with(args: &ArgMatches) -> NitroCliResult<Self> {
+            let name = args.get_one::<String>("blobs-name")
+                .ok_or(new_nitro_cli_failure!("Name of binary set must be provided",NitroCliErrorEnum::InvalidArgument))
+                .map(|s| s.to_string())?;
+            if let Some(uri) = args.get_one::<String>("URI") {
+                return Ok(FetchBlobsArgs::Uri {
+                    uri: uri.to_string(),
+                    name,
+                });
+            }
+            if let Some(version) = args.get_one::<String>("version") {
+                return Ok(FetchBlobsArgs::Version {
+                    version: version.to_string(),
+                    name,
+                });
+            }
+            Err( new_nitro_cli_failure!("Invalid arguments provided",NitroCliErrorEnum::MissingArgument))
+        }
+    }
 /// The arguments used by the `terminate-enclave` command.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminateEnclavesArgs {
@@ -532,6 +573,9 @@ fn parse_image_version(args: &ArgMatches) -> Option<String> {
 
 fn parse_metadata(args: &ArgMatches) -> Option<String> {
     args.get_one::<String>("metadata").map(String::from)
+}
+fn parse_blobs_name(args: &ArgMatches) -> Option<String> {
+    args.get_one::<String>("blobs-name").map(String::from)
 }
 
 fn parse_error_code_str(args: &ArgMatches) -> NitroCliResult<String> {
@@ -1297,5 +1341,39 @@ mod tests {
         );
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "non_existing_config.json");
+    }
+    #[test]
+    fn test_cannot_specify_both_uri_and_version(){
+        let app = create_app!();
+        let args = vec![
+            "nitro-cli",
+            "fetch-blobs",
+            "--URI",
+            "http://example.com",
+            "--version",
+            "2.2"
+        ];
+        let matches = app.try_get_matches_from(args);
+        let result = FetchBlobsArgs::new_with(matches
+            .as_ref()
+            .unwrap()
+            .subcommand_matches("fetch-blobs")
+            .unwrap());
+        assert!(result.is_err());
+    }
+    #[test]
+    fn test_must_provide_either_uri_or_version(){
+        let app = create_app!();
+        let args = vec![
+            "nitro-cli",
+            "fetch-blobs",
+        ];
+        let matches = app.try_get_matches_from(args);
+        let result = FetchBlobsArgs::new_with(matches
+            .as_ref()
+            .unwrap()
+            .subcommand_matches("fetch-blobs")
+            .unwrap());
+        assert!(result.is_err());
     }
 }
