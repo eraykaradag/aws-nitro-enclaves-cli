@@ -55,8 +55,6 @@ pub const CID_TO_CONSOLE_PORT_OFFSET: u32 = 10000;
 
 /// Default blobs path to be used if the corresponding environment variable is not set.
 const DEFAULT_BLOBS_PATH: &str = "/usr/share/nitro_enclaves/blobs/";
-/// Download path to be used to fetch binaries with `fetch-blobs` subcommand.
-const BLOBS_DOWNLOAD_PATH: &str = "/var/lib/nitro-cli/binaries";
 ///Default S3 bucket which stores pre-built binaries.
 const DEFAULT_S3_BUCKET: &str = "nitro-binaries-test";
 /// Build an enclave image file with the provided arguments.
@@ -319,7 +317,7 @@ fn blobs_path(blobs_name: Option<String>) -> NitroCliResult<String> {
     // consider using the default path used by rpm install
     let blobs_res = std::env::var("NITRO_CLI_BLOBS");
     if let Some(blobs_name) = blobs_name {
-        return Ok(blobs_res.unwrap_or_else(|_| format!("{BLOBS_DOWNLOAD_PATH}/{blobs_name}/").to_string()));
+        return Ok(blobs_res.unwrap_or_else(|_| format!("{}/{blobs_name}/",get_blobs_download_path()).to_string()));
     }
     Ok(blobs_res.unwrap_or_else(|_| DEFAULT_BLOBS_PATH.to_string()))
 }
@@ -593,7 +591,9 @@ pub async fn fetch_binaries(arg: FetchBlobsArgs) -> NitroCliResult<()>{
         FetchBlobsArgs::Uri{uri, name} => {
             fetch_from_uri(uri,name.clone()).await
             .map_err(|e|{
-                let _ = clear_dir_on_fail(name);
+                if !format!("{:?}", e).contains("Provided name of the binary set is already exist") {
+                    let _ = clear_dir_on_fail(name);
+                }
                 new_nitro_cli_failure!(&format!("Could not fetch from uri: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
             })?;
         }
@@ -601,7 +601,9 @@ pub async fn fetch_binaries(arg: FetchBlobsArgs) -> NitroCliResult<()>{
             let base_prefix = format!("s3://{DEFAULT_S3_BUCKET}/{version}/enclaves-blobs.txz");
             fetch_from_uri(base_prefix,name.clone()).await
             .map_err(|e|{
-                let _ = clear_dir_on_fail(name);
+                if !format!("{:?}", e).contains("Provided name of the binary set is already exist") {
+                    let _ = clear_dir_on_fail(name);
+                }
                 new_nitro_cli_failure!(&format!("Version mismatch: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
             })?;
         }
@@ -609,13 +611,14 @@ pub async fn fetch_binaries(arg: FetchBlobsArgs) -> NitroCliResult<()>{
     Ok(())
 }
 fn clear_dir_on_fail(name: String) -> NitroCliResult<()>{
-    let output_dir = format!("{BLOBS_DOWNLOAD_PATH}/{name}/");
+    let output_dir = format!("{}/{name}/",get_blobs_download_path());
     fs::remove_dir_all(&output_dir).map_err(|e| {
         new_nitro_cli_failure!(&format!("Could not remove download directory: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
     })?;
     Ok(())
 } 
-fn unpack_blob_archive(data: bytes::Bytes, download_dir : &String) -> NitroCliResult<()>{
+///Unpack the binaries based on architecture
+pub fn unpack_blob_archive(data: bytes::Bytes, download_dir : &String) -> NitroCliResult<()>{
 
     let xz = XzDecoder::new(&data[..]);
     let mut archive = tar::Archive::new(xz);
@@ -702,15 +705,15 @@ pub async fn list_binaries() -> NitroCliResult<()>{
     Ok(())
 }
 fn is_binary_exist(uri: String) -> NitroCliResult<String>{
-    if let Ok(entries) = fs::read_dir(BLOBS_DOWNLOAD_PATH){
+    if let Ok(entries) = fs::read_dir(get_blobs_download_path()){
         for entry in entries{
             if let Ok(entry) = entry{
                 let file_name = entry.file_name();
-                let f = std::fs::File::open(format!("{}/{}/.metadata.json",BLOBS_DOWNLOAD_PATH,file_name.to_string_lossy())).unwrap();
+                let f = std::fs::File::open(format!("{}/{}/.metadata.json",get_blobs_download_path(),file_name.to_string_lossy())).unwrap();
                 let metadata: EnclaveBlobsMetadata = serde_json::from_reader(f).unwrap();
 
                 if metadata.source == uri {
-                    return Ok(format!("{}/{}",BLOBS_DOWNLOAD_PATH,file_name.to_string_lossy()));
+                    return Ok(format!("{}/{}",get_blobs_download_path(),file_name.to_string_lossy()));
                 }
             }
         }
@@ -721,7 +724,7 @@ fn is_binary_exist(uri: String) -> NitroCliResult<String>{
     return Ok("".to_string())
 }
 fn create_dir_for_binaries(name: String) -> NitroCliResult<String>{
-    let output_dir = format!("{BLOBS_DOWNLOAD_PATH}/{name}/");
+    let output_dir = format!("{}/{name}/",get_blobs_download_path());
     if Path::new(&output_dir).exists(){
         return Err(new_nitro_cli_failure!(&format!("Provided name of the binary set is already exist."), NitroCliErrorEnum::BlobFetcherError));
     }
@@ -773,7 +776,8 @@ async fn fetch_from_uri(uri: String, name : String) -> NitroCliResult<()> {
         }
     }
 }
-async fn fetch_from_s3(url: Url) -> NitroCliResult<bytes::Bytes>{
+/// Fetches binaries from provided s3 uri.
+pub async fn fetch_from_s3(url: Url) -> NitroCliResult<bytes::Bytes>{
     let bucket = url.host_str().ok_or("No bucket specified").unwrap();
     let prefix = url.path().trim_start_matches('/');  // "releases/1.3/"
     let config = aws_config::from_env().load().await;
@@ -796,14 +800,21 @@ async fn fetch_from_s3(url: Url) -> NitroCliResult<bytes::Bytes>{
 
     Ok(bytes.into_bytes())
 }
-
-async fn fetch_from_http(uri: &String) -> NitroCliResult<bytes::Bytes>{
+/// Fetches binaries from provided uri but uri must be http.
+pub async fn fetch_from_http(uri: &String) -> NitroCliResult<bytes::Bytes>{
     let url = uri.trim_end_matches('/');
     let response = reqwest::get(url)
         .await
         .map_err(|e| {
             new_nitro_cli_failure!(&format!("Failed to download from HTTP: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
         })?;
+    // Check status code
+    if !response.status().is_success() {
+        return Err(new_nitro_cli_failure!(
+            &format!("HTTP request failed with status: {}", response.status()),
+            NitroCliErrorEnum::BlobFetcherError
+        ));
+    }
     let bytes = response.bytes()
         .await
         .map_err(|e| {
@@ -812,7 +823,8 @@ async fn fetch_from_http(uri: &String) -> NitroCliResult<bytes::Bytes>{
 
     Ok(bytes)
 }
-fn create_blobs_metadata(uri: String,output_dir: String) -> NitroCliResult<()>{
+/// Creates a metadata for binaries.
+pub fn create_blobs_metadata(uri: String,output_dir: String) -> NitroCliResult<()>{
     let metadata = EnclaveBlobsMetadata {
         source: uri,
         date: Utc::now().to_string(),
@@ -825,6 +837,13 @@ fn create_blobs_metadata(uri: String,output_dir: String) -> NitroCliResult<()>{
         })?;
     Ok(())
 }
+fn get_blobs_download_path() -> String {
+    format!("{}/.nitro_cli/binaries",
+        dirs::home_dir()
+            .expect("Could not find home directory")
+            .to_string_lossy())
+}
+
 /// Macro defining the arguments configuration for a *Nitro CLI* application.
 #[macro_export]
 macro_rules! create_app {
