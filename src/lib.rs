@@ -615,7 +615,8 @@ fn clear_dir_on_fail(name: String) -> NitroCliResult<()>{
     })?;
     Ok(())
 } 
-fn unpack_blob_archive(data: bytes::Bytes, download_dir : &String) -> NitroCliResult<()>{
+///Unpack the binaries based on architecture
+pub fn unpack_blob_archive(data: bytes::Bytes, download_dir : &String) -> NitroCliResult<()>{
 
     let xz = XzDecoder::new(&data[..]);
     let mut archive = tar::Archive::new(xz);
@@ -773,7 +774,8 @@ async fn fetch_from_uri(uri: String, name : String) -> NitroCliResult<()> {
         }
     }
 }
-async fn fetch_from_s3(url: Url) -> NitroCliResult<bytes::Bytes>{
+/// Fetches binaries from provided s3 uri.
+pub async fn fetch_from_s3(url: Url) -> NitroCliResult<bytes::Bytes>{
     let bucket = url.host_str().ok_or("No bucket specified").unwrap();
     let prefix = url.path().trim_start_matches('/');  // "releases/1.3/"
     let config = aws_config::from_env().load().await;
@@ -796,14 +798,21 @@ async fn fetch_from_s3(url: Url) -> NitroCliResult<bytes::Bytes>{
 
     Ok(bytes.into_bytes())
 }
-
-async fn fetch_from_http(uri: &String) -> NitroCliResult<bytes::Bytes>{
+/// Fetches binaries from provided uri but uri must be http.
+pub async fn fetch_from_http(uri: &String) -> NitroCliResult<bytes::Bytes>{
     let url = uri.trim_end_matches('/');
     let response = reqwest::get(url)
         .await
         .map_err(|e| {
             new_nitro_cli_failure!(&format!("Failed to download from HTTP: {:?}", e), NitroCliErrorEnum::BlobFetcherError)
         })?;
+    // Check status code
+    if !response.status().is_success() {
+        return Err(new_nitro_cli_failure!(
+            &format!("HTTP request failed with status: {}", response.status()),
+            NitroCliErrorEnum::BlobFetcherError
+        ));
+    }
     let bytes = response.bytes()
         .await
         .map_err(|e| {
@@ -812,7 +821,8 @@ async fn fetch_from_http(uri: &String) -> NitroCliResult<bytes::Bytes>{
 
     Ok(bytes)
 }
-fn create_blobs_metadata(uri: String,output_dir: String) -> NitroCliResult<()>{
+/// Creates a metadata for binaries.
+pub fn create_blobs_metadata(uri: String,output_dir: String) -> NitroCliResult<()>{
     let metadata = EnclaveBlobsMetadata {
         source: uri,
         date: Utc::now().to_string(),

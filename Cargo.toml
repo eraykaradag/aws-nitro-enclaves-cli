@@ -49,6 +49,7 @@ log = "0.4"
 num-derive = "0.4"
 num-traits = "0.2"
 tempfile = "3.5"
+wiremock = "0.5"
 
 [workspace]
 members = [".", "samples/command_executer", "driver-bindings", "eif_loader", "enclave_build", "vsock_proxy"]
