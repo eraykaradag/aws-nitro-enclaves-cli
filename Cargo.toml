@@ -40,6 +40,7 @@ futures-util = "0.3"
 lazy_static = "1.4.0"
 prettytable-rs = "0.10"
 byte-unit = "4.0"
+dirs = "5.0"
 
 [build-dependencies]
 bindgen = { version=">=0.54" }
