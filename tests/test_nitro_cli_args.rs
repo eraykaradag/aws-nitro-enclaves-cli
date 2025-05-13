@@ -690,4 +690,52 @@ mod test_nitro_cli_args {
 
         assert!(app.try_get_matches_from(args).is_ok())
     }
+    #[test]
+    fn fetch_blobs_version_requires_blobs_name() {
+        let app = create_app!();
+        let args = vec!["nitro-cli", "fetch-blobs", "--version", "1.0"];
+        assert!(app.try_get_matches_from(args).is_err());
+    }
+
+    #[test]
+    fn fetch_blobs_uri_requires_blobs_name() {
+        let app = create_app!();
+        let args = vec!["nitro-cli", "fetch-blobs", "--URI", "https://example.com"];
+        assert!(app.try_get_matches_from(args).is_err());
+    }
+
+    #[test]
+    fn fetch_blobs_list_conflicts_with_version() {
+        let app = create_app!();
+        let args = vec!["nitro-cli", "fetch-blobs", "--list", "--version", "1.0"];
+        assert!(app.try_get_matches_from(args).is_err());
+    }
+
+    #[test]
+    fn fetch_blobs_valid_version_and_blobs_name() {
+        let app = create_app!();
+        let args = vec!["nitro-cli", "fetch-blobs", "--version", "1.0", "--blobs-name", "test"];
+        assert!(app.try_get_matches_from(args).is_ok());
+    }
+
+    #[test]
+    fn fetch_blobs_valid_uri_and_blobs_name() {
+        let app = create_app!();
+        let args = vec!["nitro-cli", "fetch-blobs", "--URI", "https://example.com", "--blobs-name", "test"];
+        assert!(app.try_get_matches_from(args).is_ok());
+    }
+
+    #[test]
+    fn fetch_blobs_list_alone_is_valid() {
+        let app = create_app!();
+        let args = vec!["nitro-cli", "fetch-blobs", "--list"];
+        assert!(app.try_get_matches_from(args).is_ok());
+    }
+
+    #[test]
+    fn fetch_blobs_version_and_uri_conflict() {
+        let app = create_app!();
+        let args = vec!["nitro-cli", "fetch-blobs", "--version", "1.0", "--URI", "https://example.com", "--blobs-name", "test"];
+        assert!(app.try_get_matches_from(args).is_err());
+    }
 }

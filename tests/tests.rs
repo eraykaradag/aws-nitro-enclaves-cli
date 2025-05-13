@@ -17,7 +17,7 @@ mod tests {
     use nitro_cli::utils::{Console, PcrType};
     use nitro_cli::{
         build_enclaves, build_from_docker, describe_eif, enclave_console, get_file_pcr,
-        new_enclave_name,
+        new_enclave_name, fetch_from_http, unpack_blob_archive, create_blobs_metadata
     };
     use nitro_cli::{CID_TO_CONSOLE_PORT_OFFSET, VMADDR_CID_HYPERVISOR};
     use serde_json::json;
@@ -25,6 +25,13 @@ mod tests {
     use std::fs::{File, OpenOptions};
     use std::io::Write;
     use tempfile::{tempdir, TempDir};
+    use xz2::write::XzEncoder;
+    use bytes::Bytes;
+    use tar::{Builder, Header};
+    use std::path::Path;
+    use wiremock::{MockServer, Mock, ResponseTemplate};
+    use wiremock::matchers::{method, path};
+    use std::env::consts::ARCH;
 
     use openssl::asn1::Asn1Time;
     use openssl::ec::{EcGroup, EcKey};
@@ -84,6 +91,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         assert!(build_enclaves(args).is_err());
@@ -103,6 +111,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         let measurements = build_from_docker(
@@ -114,6 +123,7 @@ mod tests {
             &args.img_name,
             &args.img_version,
             &args.metadata,
+            args.blobs_name,
         )
         .expect("Docker build failed")
         .1;
@@ -145,6 +155,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -156,6 +167,7 @@ mod tests {
             &args.img_name,
             &args.img_version,
             &args.metadata,
+            args.blobs_name,
         )
         .expect("Docker build failed");
     }
@@ -174,6 +186,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -185,6 +198,7 @@ mod tests {
             &args.img_name,
             &args.img_version,
             &args.metadata,
+            args.blobs_name,
         )
         .expect("Docker build failed");
     }
@@ -249,6 +263,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         let measurements = build_from_docker(
@@ -260,6 +275,7 @@ mod tests {
             &args.img_name,
             &args.img_version,
             &args.metadata,
+            args.blobs_name,
         )
         .expect("Docker build failed")
         .1;
@@ -292,6 +308,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None
         };
 
         build_from_docker(
@@ -303,6 +320,7 @@ mod tests {
             &build_args.img_name,
             &build_args.img_version,
             &build_args.metadata,
+            build_args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -338,6 +356,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -349,6 +368,7 @@ mod tests {
             &build_args.img_name,
             &build_args.img_version,
             &build_args.metadata,
+            build_args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -379,6 +399,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -390,6 +411,7 @@ mod tests {
             &build_args.img_name,
             &build_args.img_version,
             &build_args.metadata,
+            build_args.blobs_name
         )
         .expect("Docker build failed");
 
@@ -486,6 +508,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -497,6 +520,7 @@ mod tests {
             &build_args.img_name,
             &build_args.img_version,
             &build_args.metadata,
+            build_args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -528,6 +552,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -539,6 +564,7 @@ mod tests {
             &build_args.img_name,
             &build_args.img_version,
             &build_args.metadata,
+            build_args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -590,6 +616,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -601,6 +628,7 @@ mod tests {
             &build_args.img_name,
             &build_args.img_version,
             &build_args.metadata,
+            build_args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -680,6 +708,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -691,6 +720,7 @@ mod tests {
             &args.img_name,
             &args.img_version,
             &args.metadata,
+            args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -771,6 +801,7 @@ mod tests {
             img_name: Some("TestName".to_string()),
             img_version: Some("1.0".to_string()),
             metadata: Some(meta_path.to_str().unwrap().to_string()),
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -782,6 +813,7 @@ mod tests {
             &args.img_name,
             &args.img_version,
             &args.metadata,
+            args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -865,6 +897,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -876,6 +909,7 @@ mod tests {
             &args.img_name,
             &args.img_version,
             &args.metadata,
+            args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -964,6 +998,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -975,6 +1010,7 @@ mod tests {
             &args.img_name,
             &args.img_version,
             &args.metadata,
+            args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -1006,6 +1042,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -1017,6 +1054,7 @@ mod tests {
             &args.img_name,
             &args.img_version,
             &args.metadata,
+            args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -1048,6 +1086,7 @@ mod tests {
             img_name: None,
             img_version: None,
             metadata: None,
+            blobs_name: None,
         };
 
         build_from_docker(
@@ -1059,6 +1098,7 @@ mod tests {
             &args.img_name,
             &args.img_version,
             &args.metadata,
+            args.blobs_name,
         )
         .expect("Docker build failed");
 
@@ -1075,5 +1115,122 @@ mod tests {
                 .unwrap(),
             pcr.get(&"PCR8".to_string()).unwrap(),
         );
+    }
+    #[test]
+    fn test_unpack_blob_archive_normal() {
+        let test_data = create_test_archive(ARCH);
+        let temp_dir = TempDir::new().unwrap();
+        let download_dir = temp_dir.path().to_string_lossy().to_string();
+
+        let result = unpack_blob_archive(test_data, &download_dir);
+        assert!(result.is_ok());
+
+        // Verify expected files based on architecture
+        let expected_files = match ARCH {
+            "x86_64" => vec!["bzImage", "bzImage.config", "cmdline", "init", "linuxkit", "nsm.ko"],
+            "aarch64" => vec!["Image", "Image.config", "cmdline", "init", "linuxkit", "nsm.ko"],
+            _ => panic!("Unsupported architecture for testing: {}", ARCH),
+        };
+
+        for file in &expected_files {
+            let file_path = std::path::Path::new(&download_dir).join(file);
+            assert!(file_path.exists(), "File {} should exist", file);
+        }
+    }
+    #[test]
+    fn test_create_blobs_metadata() {
+        // Create a temporary directory for testing
+        let temp_dir = TempDir::new().unwrap();
+        let output_dir = temp_dir.path().to_string_lossy().to_string();
+        let test_uri = "s3://test-bucket/test-blob.txz".to_string();
+
+        // Test successful metadata creation
+        let result = create_blobs_metadata(test_uri.clone(), output_dir.clone());
+        assert!(result.is_ok(), "Metadata creation should succeed");
+
+        // Verify the metadata file exists
+        let metadata_path = std::path::Path::new(&output_dir).join(".metadata.json");
+        assert!(metadata_path.exists(), "Metadata file should exist");
+
+        // Verify basic content
+        let metadata_content = std::fs::read_to_string(metadata_path).unwrap();
+        assert!(metadata_content.contains(&test_uri), "Metadata should contain the URI");
+
+        // Test with invalid directory
+        let result = create_blobs_metadata(test_uri, "/nonexistent/directory".to_string());
+        assert!(result.is_err(), "Should fail with invalid directory");
+    }
+    fn create_test_archive(arch: &str) -> Bytes {
+        let tar_data = Vec::new();
+        let mut builder = Builder::new(tar_data);
+
+        let files = match arch {
+            "x86_64" => vec![
+                ("bzImage", "Mock bzImage content", 0o644),
+                ("bzImage.config", "Mock bzImage.config content", 0o644),
+                ("cmdline", "console=ttyS0 reboot=k panic=1 pci=off", 0o644),
+                ("init", "Mock init content", 0o755),
+                ("linuxkit", "Mock linuxkit content", 0o755),
+                ("nsm.ko", "Mock nsm.ko content", 0o644),
+            ],
+            "aarch64" => vec![
+                ("Image", "Mock Image content", 0o644),
+                ("Image.config", "Mock Image.config content", 0o644),
+                ("cmdline", "console=ttyS0 reboot=k panic=1 pci=off", 0o644),
+                ("init", "Mock init content", 0o755),
+                ("linuxkit", "Mock linuxkit content", 0o755),
+                ("nsm.ko", "Mock nsm.ko content", 0o644),
+            ],
+            _ => panic!("Unsupported architecture for testing: {}", arch),
+        };
+
+        for (filename, content, mode) in files {
+            let mut header = Header::new_gnu();
+            let content_bytes = content.as_bytes();
+            header.set_size(content_bytes.len() as u64);
+            header.set_mode(mode);
+            header.set_cksum();
+
+            let path = format!("{}/{}", arch, filename);
+            builder.append_data(&mut header, &path, content_bytes).unwrap();
+        }
+
+        let tar_data = builder.into_inner().unwrap();
+        let mut xz = XzEncoder::new(Vec::new(), 6);
+        xz.write_all(&tar_data).unwrap();
+        Bytes::from(xz.finish().unwrap())
+    }
+
+    #[tokio::test]
+    async fn test_fetch_from_http() {
+        // Start a mock server
+        let mock_server = MockServer::start().await;
+
+        // Mock successful response
+        Mock::given(method("GET"))
+            .and(path("/blob.txz"))
+            .respond_with(ResponseTemplate::new(200)
+                .set_body_raw(vec![1, 2, 3, 4], "application/octet-stream"))
+            .mount(&mock_server)
+            .await;
+
+        // Mock 404 Not Found response
+        Mock::given(method("GET"))
+            .and(path("/not-found.txz"))
+            .respond_with(ResponseTemplate::new(404)
+                .set_body_string("Not Found"))
+            .mount(&mock_server)
+            .await;
+
+        // Test successful fetch
+        let success_uri = format!("{}/blob.txz", mock_server.uri());
+        let result = fetch_from_http(&success_uri).await;
+        assert!(result.is_ok(), "Expected successful fetch");
+        assert_eq!(result.unwrap(), bytes::Bytes::from(vec![1, 2, 3, 4]));
+
+        // Test 404 Not Found error
+        let not_found_uri = format!("{}/not-found.txz", mock_server.uri());
+        let result = fetch_from_http(&not_found_uri).await;
+        assert!(result.is_err(), "Expected error for 404 Not Found");
     }
 }

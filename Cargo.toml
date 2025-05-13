@@ -28,8 +28,19 @@ vsock = "0.3"
 vmm-sys-util = "0.12.1"
 sha2 = "0.9.5"
 hex = "0.4"
-
+url = "2.4"
+aws-config = "0.55"
+aws-sdk-s3 = "0.28"
+tokio = { version = "1.0", features = ["full"] }
+reqwest = { version = "0.11", features = ["json"] }
+tar = "0.4"
+xz2 = "0.1"
+bytes = "1.0"
+futures-util = "0.3"
 lazy_static = "1.4.0"
+prettytable-rs = "0.10"
+byte-unit = "4.0"
+dirs = "5.0"
 
 [build-dependencies]
 bindgen = { version=">=0.54" }
@@ -39,6 +50,7 @@ log = "0.4"
 num-derive = "0.4"
 num-traits = "0.2"
 tempfile = "3.5"
+wiremock = "0.5"
 
 [workspace]
 members = [".", "samples/command_executer", "driver-bindings", "eif_loader", "enclave_build", "vsock_proxy","allocator"]
